@@ -233,15 +233,29 @@ module HLPTick3 =
                     }
                 placeSymbol symLabel (Custom ccType) position model
             
-        
+        let getSymbolFromLabel (symLabel: string) (model: SheetT.Model) : (SymbolT.Symbol option) =
+            model.Wire.Symbol.Symbols
+            |> Map.toList
+            |> List.map snd
+            |> List.tryFind (fun sym -> sym.Component.Label = symLabel)
 
         // Rotate a symbol
         let rotateSymbol (symLabel: string) (rotate: Rotation) (model: SheetT.Model) : (SheetT.Model) =
-            failwithf "Not Implemented"
+            let symbol = getSymbolFromLabel symLabel model
+            match symbol with
+            | Some s ->
+                let newModel = SymbolUpdate.updateSymbol (SymbolResizeHelpers.rotateSymbol rotate) s.Id model.Wire.Symbol
+                {model with Wire.Symbol=newModel}
+            | None -> model
 
         // Flip a symbol
         let flipSymbol (symLabel: string) (flip: SymbolT.FlipType) (model: SheetT.Model) : (SheetT.Model) =
-            failwithf "Not Implemented"
+            let symbol = getSymbolFromLabel symLabel model
+            match symbol with
+            | Some s ->
+                let newModel = SymbolUpdate.updateSymbol (SymbolResizeHelpers.flipSymbol flip) s.Id model.Wire.Symbol
+                {model with Wire.Symbol=newModel}
+            | None -> model
 
         /// Add a (newly routed) wire, source specifies the Output port, target the Input port.
         /// Return an error if either of the two ports specified is invalid, or if the wire duplicates and existing one.
@@ -338,7 +352,41 @@ module HLPTick3 =
         |> Result.bind (placeWire (portOf "FF1" 0) (portOf "G1" 0) )
         |> getOkOrFail
 
+    let makeAdvTestCircuit
+        (andPos: XYPos)
+        (rotateAnd: Rotation)
+        (rotateDFF: Rotation)
+        (flipAnd: SymbolT.FlipType option)
+        (flipDFF: SymbolT.FlipType option) =
+        makeTest1Circuit andPos
+        |> rotateSymbol "G1" rotateAnd
+        |> rotateSymbol "FF1" rotateDFF
+        |> match flipAnd with
+            | Some f -> flipSymbol "G1" f
+            | None -> id
+        |> match flipDFF with
+            | Some f -> flipSymbol "FF1" f
+            | None -> id
 
+    /// Sample data based on a grid of 121 points around the sheet center,
+    /// filtered to remove samples which cause symbol-symbol intersections.
+    /// (for this test, we are only interested in symbol-segment intersections).
+    /// Sample data based on a grid of 121 points around the sheet center.
+    let gridPositions =
+        let coords =
+            fromList [-100..5..100]
+            |> map (fun n -> float n)
+        product (fun x y -> middleOfSheet + {X=x; Y=y}) coords coords
+        |> filter (fun pos ->
+            let sheet = makeTest1Circuit pos
+            let boxes =
+                mapValues sheet.BoundingBoxes
+                |> Array.toList
+                |> List.mapi (fun n box -> n,box)
+            List.allPairs boxes boxes 
+            |> List.exists (fun ((n1,box1),(n2,box2)) -> (n1 <> n2) && BlockHelpers.overlap2DBox box1 box2)
+            |> not
+        )
 
 //------------------------------------------------------------------------------------------------//
 //-------------------------Example assertions used to test sheets---------------------------------//
@@ -446,6 +494,17 @@ module HLPTick3 =
                 dispatch
             |> recordPositionInTest testNum dispatch
 
+        /// My test: Grid-space AND + DFF: fail tests on wire+symbol intersect.
+        let test5 testNum firstSample dispatch =
+            runTestOnSheets
+                "Grid-spaced AND + DFF: fail tests on wire+symbol intersect"
+                firstSample
+                gridPositions
+                makeTest1Circuit
+                Asserts.failOnWireIntersectsSymbol
+                dispatch
+            |> recordPositionInTest testNum dispatch
+
         /// List of tests available which can be run ftom Issie File Menu.
         /// The first 9 tests can also be run via Ctrl-n accelerator keys as shown on menu
         let testsToRunFromSheetMenu : (string * (int -> int -> Dispatch<Msg> -> Unit)) list =
@@ -455,8 +514,9 @@ module HLPTick3 =
                 "Test1", test1 // example
                 "Test2", test2 // example
                 "Test3", test3 // example
-                "Test4", test4 
-                "Test5", fun _ _ _ -> printf "Test5" // dummy test - delete line or replace by real test as needed
+                "Test4", test4
+                "Test5", test5 // My test
+                //"Test5", fun _ _ _ -> printf "Test5" // dummy test - delete line or replace by real test as needed
                 "Test6", fun _ _ _ -> printf "Test6"
                 "Test7", fun _ _ _ -> printf "Test7"
                 "Test8", fun _ _ _ -> printf "Test8"
