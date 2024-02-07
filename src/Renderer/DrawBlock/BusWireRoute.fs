@@ -264,15 +264,15 @@ let maxVertDistanceFromBox
 /// Limit in recursion depth defined by argument callsLeft given to initial function call.
 /// Limit needed to prevent Issie from breaking when there are physically
 /// no possible routes that achieve 0 intersections.
-/// Returns None if no route found
+/// Returns Error route if no route found
 let rec tryShiftHorizontalSeg
     (callsLeft: int)
     (model: Model)
     (intersectedBoxes: BoundingBox list)
     (wire: Wire)
-    : Wire option =
+    : Result<Wire, Wire> =
     match callsLeft with
-    | 0 -> None
+    | 0 -> Error wire
     | n ->
         let tryShiftHorizontalSeg = tryShiftHorizontalSeg (n - 1)
 
@@ -374,11 +374,11 @@ let rec tryShiftHorizontalSeg
         match goodWire Up_, goodWire Down_ with
         | Ok upWire, Ok downWire ->
             if getWireLength upWire < getWireLength downWire then
-                Some upWire
+                Ok upWire
             else
-                Some downWire
-        | Ok upWire, _ -> Some upWire
-        | _, Ok downWire -> Some downWire
+                Ok downWire
+        | Ok upWire, _ -> Ok upWire
+        | _, Ok downWire -> Ok downWire
         | Error(upIntersections, upShiftedWire), Error(downIntersections, downShiftedWire) ->
             [ currentStartPos; currentEndPos ]
             |> List.map (maxVertDistanceFromBox intersectedBoxes wire.InitialOrientation)
@@ -388,7 +388,16 @@ let rec tryShiftHorizontalSeg
             | Some(Above _) -> tryShiftHorizontalSeg model downIntersections downShiftedWire
             | Some(Below _) -> tryShiftHorizontalSeg model upIntersections upShiftedWire)
 
-
+/// Wrapper function for old implementation for testing.
+let tryShiftHorizontalSegOld
+    (callsLeft: int)
+    (model: Model)
+    (intersectedBoxes: BoundingBox list)
+    (wire: Wire)
+    : Wire option =
+    match tryShiftHorizontalSeg callsLeft model intersectedBoxes wire with
+    | Ok w -> Some w
+    | Error _ -> None
 
 //------------------------------------------------------------------------//
 //-----------------------------Snapping to Net----------------------------//
@@ -515,7 +524,7 @@ let smartAutoroute (model: Model) (wire: Wire) : Wire =
         let resultOld =
             tryShiftVerticalSegOld model intersectedBoxes snappedToNetWire
             |> Option.orElse (
-                tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire
+                tryShiftHorizontalSegOld maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire
             )
             |> Option.defaultValue snappedToNetWire
         let resultNew =
@@ -524,11 +533,28 @@ let smartAutoroute (model: Model) (wire: Wire) : Wire =
             | Error (lWire, rWire) -> 
                 let lIntersect = findWireSymbolIntersections model lWire
                 let rIntersect = findWireSymbolIntersections model rWire
-                tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire
-                |> Option.orElse (tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model lIntersect lWire)
-                |> Option.orElse (tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model rIntersect rWire)
+                tryShiftHorizontalSegOld maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire
+                |> Option.orElse (tryShiftHorizontalSegOld maxCallsToShiftHorizontalSeg model lIntersect lWire)
+                |> Option.orElse (tryShiftHorizontalSegOld maxCallsToShiftHorizontalSeg model rIntersect rWire)
                 |> Option.defaultValue snappedToNetWire
-        resultOld
+                //match tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire with
+                //| Ok hWire -> hWire
+                //| Error hWire ->
+                //    let hIntersect = findWireSymbolIntersections model hWire
+                //    tryShiftHorizontalSegOld maxCallsToShiftHorizontalSeg model lIntersect lWire
+                //    |> Option.orElse (tryShiftHorizontalSegOld maxCallsToShiftHorizontalSeg model rIntersect rWire)
+                //    |> Option.orElse (tryShiftVerticalSegOld model hIntersect hWire)
+                //    |> Option.defaultValue snappedToNetWire
+        resultNew
+        //match tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire with
+        //| Ok w -> w
+        //| Error w -> w
+        //    printf "failed"
+        //    snappedToNetWire
+        //match tryShiftVerticalSeg model intersectedBoxes snappedToNetWire with
+        //| Ok wire -> wire
+        //| Error (lWire, rWire) -> rWire
+
 
 
 //-----------------------------------------------------------------------------------------------------------//

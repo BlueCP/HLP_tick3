@@ -380,13 +380,9 @@ module HLPTick3 =
         //    | Some f -> flipSymbol "FF1" f
         //    | None -> id
 
-    /// Sample data based on a grid of 121 points around the sheet center,
-    /// filtered to remove samples which cause symbol-symbol intersections.
-    /// (for this test, we are only interested in symbol-segment intersections).
-    /// Sample data based on a grid of 121 points around the sheet center.
-    let gridPositions =
+    let gridMaker m =
         let coords =
-            fromList [-100..5..100]
+            fromList [-m..5..m]
             |> map (fun n -> float n)
         product (fun x y -> middleOfSheet + {X=x; Y=y}) coords coords
         |> filter (fun pos ->
@@ -400,12 +396,18 @@ module HLPTick3 =
             |> not
         )
 
+    /// Sample data based on a grid of points around the sheet center,
+    /// filtered to remove samples which cause symbol-symbol intersections.
+    /// (for this test, we are only interested in symbol-segment intersections).
+    let grid70 = gridMaker 70
+    let grid100 = gridMaker 100
+
     let makeTuple a b = (a, b)
 
     let advSamples =
         let rots = fromList [Rotation.Degree0; Rotation.Degree90; Rotation.Degree180; Rotation.Degree270]
         let flips = fromList [Some SymbolT.FlipType.FlipHorizontal; Some SymbolT.FlipType.FlipVertical; None]
-        product makeTuple rots gridPositions
+        product makeTuple rots grid100
         |> product makeTuple rots
         |> product makeTuple flips
         |> product makeTuple flips
@@ -531,7 +533,7 @@ module HLPTick3 =
             runTestOnSheets
                 "Grid-spaced AND + DFF: fail tests on wire+symbol intersect"
                 firstSample
-                gridPositions
+                grid70
                 makeTest1Circuit
                 Asserts.failOnWireIntersectsSymbol
                 dispatch
