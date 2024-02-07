@@ -1,7 +1,7 @@
 ﻿module TestDrawBlock
 open GenerateData
 open Elmish
-
+open SymbolResizeHelpers
 
 //-------------------------------------------------------------------------------------------//
 //--------Types to represent tests with (possibly) random data, and results from tests-------//
@@ -173,7 +173,6 @@ module HLPTick3 =
 //------------------------------------------------------------------------------------------------------------------------//
     module Builder =
 
-
                 
 
             
@@ -244,8 +243,10 @@ module HLPTick3 =
             let symbol = getSymbolFromLabel symLabel model
             match symbol with
             | Some s ->
-                let newModel = SymbolUpdate.updateSymbol (SymbolResizeHelpers.rotateSymbol rotate) s.Id model.Wire.Symbol
-                {model with Wire.Symbol=newModel}
+                //let symModel = RotateScale.rotateBlock [s.Id] model.Wire.Symbol rotate
+                let symModel = SymbolUpdate.updateSymbol (rotateAntiClockByAng rotate) s.Id model.Wire.Symbol
+                let wire = model.Wire
+                {model with Wire={wire with Symbol=symModel}}
             | None -> model
 
         // Flip a symbol
@@ -253,8 +254,10 @@ module HLPTick3 =
             let symbol = getSymbolFromLabel symLabel model
             match symbol with
             | Some s ->
-                let newModel = SymbolUpdate.updateSymbol (SymbolResizeHelpers.flipSymbol flip) s.Id model.Wire.Symbol
-                {model with Wire.Symbol=newModel}
+                let symModel = RotateScale.flipBlock [s.Id] model.Wire.Symbol flip
+                //let symModel = SymbolUpdate.updateSymbol (flipSymbol flip) s.Id model.Wire.Symbol
+                let wire = model.Wire
+                {model with Wire={wire with Symbol=symModel}}
             | None -> model
 
         /// Add a (newly routed) wire, source specifies the Output port, target the Input port.
@@ -352,21 +355,30 @@ module HLPTick3 =
         |> Result.bind (placeWire (portOf "FF1" 0) (portOf "G1" 0) )
         |> getOkOrFail
 
-    let makeAdvTestCircuit
-        (andPos: XYPos)
-        (rotateAnd: Rotation)
-        (rotateDFF: Rotation)
-        (flipAnd: SymbolT.FlipType option)
-        (flipDFF: SymbolT.FlipType option) =
-        makeTest1Circuit andPos
-        |> rotateSymbol "G1" rotateAnd
-        |> rotateSymbol "FF1" rotateDFF
+    let makeAdvTestCircuit (flipDFF, (flipAnd, (rotateDFF, (rotateAnd, andPos)))) =
+        initSheetModel
+        |> placeSymbol "G1" (GateN(And,2)) andPos
+        |> Result.map (rotateSymbol "G1" rotateAnd)
         |> match flipAnd with
-            | Some f -> flipSymbol "G1" f
+            | Some f -> Result.map (flipSymbol "G1" f)
             | None -> id
+        |> Result.bind (placeSymbol "FF1" DFF middleOfSheet)
+        |> Result.map (rotateSymbol "FF1" rotateDFF)
         |> match flipDFF with
-            | Some f -> flipSymbol "FF1" f
+            | Some f -> Result.map (flipSymbol "FF1" f)
             | None -> id
+        |> Result.bind (placeWire (portOf "G1" 0) (portOf "FF1" 0))
+        |> Result.bind (placeWire (portOf "FF1" 0) (portOf "G1" 0) )
+        |> getOkOrFail
+        //makeTest1Circuit andPos
+        //|> rotateSymbol "G1" rotateAnd
+        //|> rotateSymbol "FF1" rotateDFF
+        //|> match flipAnd with
+        //    | Some f -> flipSymbol "G1" f
+        //    | None -> id
+        //|> match flipDFF with
+        //    | Some f -> flipSymbol "FF1" f
+        //    | None -> id
 
     /// Sample data based on a grid of 121 points around the sheet center,
     /// filtered to remove samples which cause symbol-symbol intersections.
@@ -387,6 +399,26 @@ module HLPTick3 =
             |> List.exists (fun ((n1,box1),(n2,box2)) -> (n1 <> n2) && BlockHelpers.overlap2DBox box1 box2)
             |> not
         )
+
+    let makeTuple a b = (a, b)
+
+    let advSamples =
+        let rots = fromList [Rotation.Degree0; Rotation.Degree90; Rotation.Degree180; Rotation.Degree270]
+        let flips = fromList [Some SymbolT.FlipType.FlipHorizontal; Some SymbolT.FlipType.FlipVertical; None]
+        product makeTuple rots gridPositions
+        |> product makeTuple rots
+        |> product makeTuple flips
+        |> product makeTuple flips
+        //|> filter (fun (_, (_, (_, (_, pos)))) ->
+        //    let sheet = makeTest1Circuit pos
+        //    let boxes =
+        //        mapValues sheet.BoundingBoxes
+        //        |> Array.toList
+        //        |> List.mapi (fun n box -> n,box)
+        //    List.allPairs boxes boxes 
+        //    |> List.exists (fun ((n1,box1),(n2,box2)) -> (n1 <> n2) && BlockHelpers.overlap2DBox box1 box2)
+        //    |> not
+        //)
 
 //------------------------------------------------------------------------------------------------//
 //-------------------------Example assertions used to test sheets---------------------------------//
@@ -505,6 +537,21 @@ module HLPTick3 =
                 dispatch
             |> recordPositionInTest testNum dispatch
 
+        /// Test 5 with additional random rotation/flip.
+        let test6 testNum firstSample dispatch =
+            runTestOnSheets
+                "Grid-spaced AND + DFF: fail tests on wire+symbol intersect"
+                firstSample
+                (advSamples
+                    |> toArray
+                    |> shuffleA
+                    |> fromArray
+                    |> truncate 100)
+                makeAdvTestCircuit
+                Asserts.failOnWireIntersectsSymbol
+                dispatch
+            |> recordPositionInTest testNum dispatch
+
         /// List of tests available which can be run ftom Issie File Menu.
         /// The first 9 tests can also be run via Ctrl-n accelerator keys as shown on menu
         let testsToRunFromSheetMenu : (string * (int -> int -> Dispatch<Msg> -> Unit)) list =
@@ -516,8 +563,9 @@ module HLPTick3 =
                 "Test3", test3 // example
                 "Test4", test4
                 "Test5", test5 // My test
+                "Test6", test6
                 //"Test5", fun _ _ _ -> printf "Test5" // dummy test - delete line or replace by real test as needed
-                "Test6", fun _ _ _ -> printf "Test6"
+                //"Test6", fun _ _ _ -> printf "Test6"
                 "Test7", fun _ _ _ -> printf "Test7"
                 "Test8", fun _ _ _ -> printf "Test8"
                 "Next Test Error", fun _ _ _ -> printf "Next Error:" // Go to the nexterror in a test
