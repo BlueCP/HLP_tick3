@@ -132,8 +132,8 @@ let changeSegment (segIndex: int) (newLength: float) (segments: Segment list) =
     List.updateAt segIndex { segments[segIndex] with Length = newLength } segments
 
 /// Try shifting vertical seg to either - wireSeparationFromSymbol or + wireSeparationFromSymbol of intersected symbols.
-/// Returns None if no route found.
-let tryShiftVerticalSeg (model: Model) (intersectedBoxes: BoundingBox list) (wire: Wire) : Wire option =
+/// Returns Ok or Error depending on whether route is found. Error contains attempted new wires.
+let tryShiftVerticalSeg (model: Model) (intersectedBoxes: BoundingBox list) (wire: Wire) : Result<Wire, Wire*Wire> =
     let wireVertices =
         segmentsToIssieVertices wire.Segments wire
         |> List.map (fun (x, y, _) -> { X = x; Y = y })
@@ -194,10 +194,20 @@ let tryShiftVerticalSeg (model: Model) (intersectedBoxes: BoundingBox list) (wir
         findWireSymbolIntersections model tryShiftRightWire
 
     // Check which newly generated wire has no intersections, return that
+    //match leftShiftedWireIntersections, rightShiftedWireIntersections with
+    //| [], _ -> Some tryShiftLeftWire
+    //| _, [] -> Some tryShiftRightWire
+    //| _, _ ->  None
     match leftShiftedWireIntersections, rightShiftedWireIntersections with
-    | [], _ -> Some tryShiftLeftWire
-    | _, [] -> Some tryShiftRightWire
-    | _, _ ->  None
+    | [], _ -> Ok tryShiftLeftWire
+    | _, [] -> Ok tryShiftRightWire
+    | _, _ -> Error (tryShiftLeftWire, tryShiftRightWire)
+
+/// Wrapper to implement the old shift vertical algorithm, for testing.
+let tryShiftVerticalSegOld (model: Model) (intersectedBoxes: BoundingBox list) (wire: Wire) : Wire option =
+    match tryShiftVerticalSeg model intersectedBoxes wire with
+    | Ok w -> Some w
+    | Error (w1, w2) -> None
 
 //------------------------------------------------------------------------//
 //-------------------------Shifting Horizontal Segment--------------------//
@@ -502,12 +512,23 @@ let smartAutoroute (model: Model) (wire: Wire) : Wire =
     match intersectedBoxes.Length with
     | 0 -> snappedToNetWire
     | _ ->
-        tryShiftVerticalSeg model intersectedBoxes snappedToNetWire
-        |> Option.orElse (
-            tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire
-        )
-        |> Option.defaultValue snappedToNetWire
-   
+        let resultOld =
+            tryShiftVerticalSegOld model intersectedBoxes snappedToNetWire
+            |> Option.orElse (
+                tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire
+            )
+            |> Option.defaultValue snappedToNetWire
+        let resultNew =
+            match tryShiftVerticalSeg model intersectedBoxes snappedToNetWire with
+            | Ok wire -> wire
+            | Error (lWire, rWire) -> 
+                let lIntersect = findWireSymbolIntersections model lWire
+                let rIntersect = findWireSymbolIntersections model rWire
+                tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire
+                |> Option.orElse (tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model lIntersect lWire)
+                |> Option.orElse (tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model rIntersect rWire)
+                |> Option.defaultValue snappedToNetWire
+        resultOld
 
 
 //-----------------------------------------------------------------------------------------------------------//

@@ -75,7 +75,6 @@ let rotateSymbol (rotation: Rotation) (sym: Symbol) : Symbol =
         
     | _ ->
         let h,w = getRotatedHAndW sym
-        printf "%A" rotation
         let newPos = adjustPosForRotation rotation h w sym.Pos
         let newComponent = { sym.Component with X = newPos.X; Y = newPos.Y}
 
